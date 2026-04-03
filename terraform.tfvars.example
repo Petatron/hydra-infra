@@ -1,0 +1,20 @@
+# Add/remove/resize workers by editing this map.
+# Key = VM name (becomes the K8s node name).
+workers = {
+  wk1 = { vcpus = 2, ram_mb = 4096, disk_gb = 40 }
+  wk2 = { vcpus = 2, ram_mb = 4096, disk_gb = 40 }
+  wk3 = { vcpus = 2, ram_mb = 4096, disk_gb = 40 }
+  # wk4 = { vcpus = 4, ram_mb = 8192, disk_gb = 80 }
+}
+
+base_image_path      = "/home/yibofu/vms/images/ubuntu-24.04-server-cloudimg-amd64.img"
+ssh_public_key       = "ssh-ed25519 AAAA... your-public-key"
+ssh_private_key_path = "/home/yibofu/.ssh/id_ed25519"
+control_plane_ip     = "192.168.15.10"
+control_plane_user   = "yibofu"
+k8s_version          = "1.35"
+bridge_name          = "br0"
+
+node_labels = {
+  nodepool = "compute"
+}

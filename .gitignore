@@ -1,0 +1,13 @@
+.terraform/
+*.tfstate
+*.tfstate.backup
+tfplan
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# tfvars contains real SSH keys and IPs — use terraform.tfvars.example as template
+terraform.tfvars

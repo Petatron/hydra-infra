@@ -1,0 +1,64 @@
+name: Manage K8s Worker Nodes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform.tfvars"
+      - "main.tf"
+      - "variables.tf"
+      - "templates/**"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  TF_IN_AUTOMATION: "true"
+  SSH_KEY: "/home/yibofu/.ssh/id_ed25519"
+  KUBECONFIG: "/home/yibofu/.kube/config"
+  CONTROL_PLANE_IP: "192.168.15.10"
+
+jobs:
+  # ---------- Plan (PRs + manual "plan") ----------
+  plan:
+    if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform Init
+        run: terraform init -input=false -no-color
+
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+  # ---------- Apply (push to main + manual "apply") ----------
+  apply:
+    if: github.event_name == 'push' || github.event.inputs.action == 'apply'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync Nodes (plan + apply + join)
+        run: ./scripts/sync-nodes.sh apply
+
+  # ---------- Destroy (manual only) ----------
+  destroy:
+    if: github.event.inputs.action == 'destroy'
+    runs-on: self-hosted
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Destroy All Nodes
+        run: ./scripts/sync-nodes.sh destroy
