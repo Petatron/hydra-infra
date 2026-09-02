@@ -1,13 +1,19 @@
 name: Manage K8s Worker Nodes
 
+# NO push trigger, deliberately. See ADR-002 (single-writer worker lifecycle).
+#
+# This workflow used to run `sync-nodes.sh apply` -- which creates, joins and
+# destroys worker VMs -- automatically on every push to main that touched
+# main.tf, variables.tf, terraform.tfvars or templates/. That is an unattended
+# mutation of machine lifecycle, and Cluster API is taking that job over.
+#
+# Two systems reconciling the same worker fleet is the split-brain this repo
+# must not create. Removing the trigger costs nothing today: Terraform has never
+# actually run against this infrastructure (no state file anywhere, no terraform
+# binary on the host), and nothing on the hypervisor was created by it.
+#
+# Applying is still possible -- deliberately, by a human, via workflow_dispatch.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "terraform.tfvars"
-      - "main.tf"
-      - "variables.tf"
-      - "templates/**"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -42,9 +48,9 @@ jobs:
       - name: Terraform Plan
         run: terraform plan -no-color
 
-  # ---------- Apply (push to main + manual "apply") ----------
+  # ---------- Apply (manual "apply" ONLY -- never automatic) ----------
   apply:
-    if: github.event_name == 'push' || github.event.inputs.action == 'apply'
+    if: github.event.inputs.action == 'apply'
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
