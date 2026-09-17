@@ -53,11 +53,11 @@ resource "libvirt_cloudinit_disk" "worker" {
 # VM domain per worker
 # ---------------------------------------------------------------------------
 resource "libvirt_domain" "worker" {
-  for_each  = var.workers
-  name      = each.key
-  vcpu      = each.value.vcpus
-  memory    = each.value.ram_mb
-  autostart = true
+  for_each   = var.workers
+  name       = each.key
+  vcpu       = each.value.vcpus
+  memory     = each.value.ram_mb
+  autostart  = true
   qemu_agent = true
 
   cloudinit = libvirt_cloudinit_disk.worker[each.key].id

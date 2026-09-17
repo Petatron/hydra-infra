@@ -17,7 +17,7 @@ main.tf / variables.tf / outputs.tf / versions.tf   # libvirt VMs from a `worker
 terraform.tfvars(.example)                          # the fleet definition
 templates/user-data.tpl, meta-data.tpl              # cloud-init
 scripts/sync-nodes.sh                               # drain removed → apply → join new → label
-.github/workflows/manage-nodes.yml                  # plan on PR, apply only by hand
+.github/workflows/validate.yml                      # fmt + validate on PR; never applies
 Makefile                                            # init / plan / apply / destroy / fmt / validate
 ```
 
@@ -41,32 +41,42 @@ this repo should be confined to correcting what is wrong, documenting it, or ret
 
 ## Never restore the automatic apply
 
-`manage-nodes.yml` deliberately has **no `push` trigger**. It used to run `sync-nodes.sh apply` —
-which creates, joins, and destroys worker VMs — on every push to `main` touching `main.tf`,
-`variables.tf`, `terraform.tfvars`, or `templates/`. That is an unattended mutation of machine
-lifecycle (PET-29, ADR-002).
+**CI never applies anything, and never plans either.** `validate.yml` runs `terraform fmt -check`,
+`terraform init -backend=false`, and `terraform validate` on a GitHub-hosted runner. No backend, no
+state, no hypervisor connection — `validate` never dials the provider's endpoint; only `plan` and
+`apply` do.
 
-What remains, and must remain:
+The workflow used to run `sync-nodes.sh apply` — which creates, joins, and destroys worker VMs — on
+every push to `main` touching `main.tf`, `variables.tf`, `terraform.tfvars`, or `templates/`. That
+is an unattended mutation of machine lifecycle, and Cluster API has taken that job over (PET-29,
+ADR-002).
 
-- `pull_request` → **plan only**
-- `workflow_dispatch` → `plan` / `apply` / `destroy`, chosen **by a human**
+**The `plan` / `apply` / `destroy` jobs are gone (PET-48).** They ran on `runs-on: self-hosted`, and
+no self-hosted runner was ever registered on this repo — so from 2026-04-03 every run sat `queued`
+until GitHub cancelled it at the 24-hour limit. `terraform plan` has never once executed here. Since
+`plan` must reach the hypervisor it cannot move to a hosted runner, and standing up a runner for a
+repo Cluster API is superseding is effort better spent in the provider.
 
-Do not add a `push` trigger, an auto-approve, or an `apply` on any automatic event, however
-convenient. The comment block at the top of that workflow explains why — keep it.
+Applying is still possible, deliberately, by a human on the hypervisor: **`make apply` /
+`make destroy`**. It is not available from CI, on purpose.
 
-Because Terraform manages local libvirt VMs, the workflow runs on a **self-hosted runner on the
-hypervisor host**, with real SSH keys and a real kubeconfig in its environment.
+Do not add a `push`-triggered apply, an auto-approve, or an `apply` job on any automatic event,
+however convenient. Do not re-add a `plan` job without first registering a runner. The comment block
+at the top of `validate.yml` explains the whole history — keep it.
 
 ## Known-wrong values — fix these, do not copy them
 
 **The control-plane address in this repo is stale, and the stale value is now dangerous.**
 
-Both `.github/workflows/manage-nodes.yml` (`CONTROL_PLANE_IP`) and `terraform.tfvars.example`
-(`control_plane_ip`) say `192.168.15.10`.
+**Fixed 2026-09-16 (PET-48), but know the history.** `terraform.tfvars.example` said
+`control_plane_ip = "192.168.15.10"` and the old workflow carried the same value as
+`CONTROL_PLANE_IP`. Both are gone: the value is now `192.168.16.10`, and the workflow no longer
+sets it at all.
 
-- The home control plane is actually at **`192.168.16.10`**.
-- `192.168.15.10` is now the **kube-vip VIP of the `hydra-wl0` workload cluster**, held by its
-  control-plane nodes.
+- The home control plane is **`192.168.16.10`** — verified against the live cluster: `hlcluster-ctrlr0`
+  serves `https://192.168.16.10:6443` and holds that address on its interface.
+- `192.168.15.10` is the **kube-vip VIP of the `hydra-wl0` workload cluster**. The hypervisor
+  `hycluster-worker-0` sits on `192.168.15.13`, on that same subnet.
 
 So a `sync-nodes.sh apply` with the checked-in defaults would try to join workers to a cluster that
 is not the one intended. Verify the address against the live cluster before any apply, and never
