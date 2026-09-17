@@ -1,26 +1,41 @@
 # hydra-infra
 
-Terraform + CI/CD pipeline to declaratively manage KVM worker VMs and join them to the home Kubernetes control plane.
+Terraform to declaratively manage KVM worker VMs and join them to the home Kubernetes control plane.
+
+> **Legacy path.** Machine lifecycle now belongs to
+> [`cluster-api-provider-hydra`](https://github.com/Petatron/cluster-api-provider-hydra), which
+> provisions VMs from `HydraMachine` objects with no SSH orchestration. Two systems reconciling the
+> same worker fleet is the split-brain ADR-002 forbids, so **CI here never applies anything**.
+> Terraform has also never actually run against this infrastructure — there is no state file and
+> nothing on the hypervisor was created by it. Treat the config as unproven.
 
 ## Architecture
 
 ```
-  terraform.tfvars           sync-nodes.sh             GitHub Actions
-  ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
-  │ workers = {  │  ─plan─► │ drain removed│  ◄────── │ push to main │
-  │   wk1 = {}  │  ─apply► │ tf apply     │          │ PR → plan    │
-  │   wk2 = {}  │          │ join new     │          │ manual trigger│
-  │ }            │          │ label nodes  │          └──────────────┘
-  └──────────────┘          └──────────────┘
+  terraform.tfvars           sync-nodes.sh              GitHub Actions
+  ┌──────────────┐          ┌──────────────┐          ┌───────────────┐
+  │ workers = {  │  ─plan─► │ drain removed│          │ PR → fmt +    │
+  │   wk1 = {}   │  ─apply► │ tf apply     │          │ validate only │
+  │   wk2 = {}   │          │ join new     │          │ (no plan,     │
+  │ }            │          │ label nodes  │          │  no apply)    │
+  └──────────────┘          └──────────────┘          └───────────────┘
          │                         │
          ▼                         ▼
   libvirt/KVM VMs          kubeadm join → K8s cluster
   (br0 bridge, DHCP)       (Cilium CNI)
 ```
 
-**To add a worker**: add an entry to `workers` in `terraform.tfvars`, push to `main`.
-**To remove a worker**: delete the entry, push to `main`. The pipeline drains the K8s node first.
-**To resize a worker**: change vcpus/ram_mb/disk_gb. This recreates the VM (drain → destroy → create → join).
+Editing the `workers` map adds, removes, or resizes a worker; a resize **recreates** the VM
+(drain → destroy → create → join). **None of that happens from CI.** Run it deliberately, by hand,
+on the hypervisor:
+
+```bash
+make plan      # ./scripts/sync-nodes.sh plan
+make apply     # mutates real VMs and real cluster membership
+```
+
+CI runs only `terraform fmt -check`, `terraform init -backend=false` and `terraform validate` — no
+backend, no state, no hypervisor connection.
 
 ## Prerequisites
 

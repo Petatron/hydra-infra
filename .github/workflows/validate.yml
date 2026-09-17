@@ -1,0 +1,70 @@
+name: Validate Terraform
+
+# This workflow does NOT create, join, or destroy anything. It type-checks the
+# configuration and stops. See ADR-002 (single-writer worker lifecycle).
+#
+# History, because the shape of this file is deliberate:
+#
+# It used to run `sync-nodes.sh apply` -- which creates, joins and destroys
+# worker VMs -- automatically on every push to main that touched main.tf,
+# variables.tf, terraform.tfvars or templates/. That is an unattended mutation
+# of machine lifecycle, and Cluster API has taken that job over. Two systems
+# reconciling the same worker fleet is the split-brain this repo must not
+# create, so the push trigger was removed (PET-29).
+#
+# What replaced it was a `plan` job on a self-hosted runner -- but no such
+# runner was ever registered, so every run since 2026-04-03 sat queued until
+# GitHub cancelled it at the 24h limit. `terraform plan` has never executed
+# here. `plan` needs to reach the hypervisor, so it cannot move to a hosted
+# runner, and standing up a runner for a repo Cluster API is superseding is
+# effort better spent in the provider (PET-48).
+#
+# So the checks that remain are the ones that need no infrastructure at all:
+# formatting, provider resolution against the committed lockfile, and
+# `terraform validate`. No backend, no state, no hypervisor connection --
+# `validate` never dials the provider's endpoint; only plan/apply do.
+#
+# Applying is still possible, deliberately, by a human on the hypervisor:
+# `make apply` / `make destroy`. It is NOT available from CI, on purpose.
+# Do not add a push trigger, an auto-approve, or an apply job on any event.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Terraform validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: '1.16.3'
+          terraform_wrapper: false
+
+      - name: Formatting
+        run: terraform fmt -check -recursive -diff
+
+      # -backend=false: there is no backend and no state anywhere. This only
+      # resolves providers, and -lockfile=readonly makes the committed
+      # .terraform.lock.hcl authoritative, so a new upstream release cannot
+      # silently change what CI validates against.
+      - name: Initialise providers
+        run: terraform init -backend=false -input=false -lockfile=readonly -no-color
+
+      - name: Validate
+        run: terraform validate -no-color
